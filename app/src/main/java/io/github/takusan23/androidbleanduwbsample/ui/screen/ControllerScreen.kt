@@ -25,9 +25,6 @@ import androidx.core.uwb.UwbDevice
 import androidx.core.uwb.UwbManager
 import io.github.takusan23.androidbleanduwbsample.UwbControllerParams
 import io.github.takusan23.androidbleanduwbsample.ble.BlePeripheral
-import io.github.takusan23.androidbleanduwbsample.ui.components.UwbArrow
-import io.github.takusan23.androidbleanduwbsample.ui.components.UwbPointCanvas
-import io.github.takusan23.androidbleanduwbsample.ui.components.UwbRecordPointCanvas
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -125,30 +122,10 @@ fun ControllerScreen() {
         ) {
             // null になりえるので注意
             Text(text = "距離 = ${uwbPosition.value?.distance?.value} m")
-            Text(text = "方位角 = ${uwbPosition.value?.azimuth?.value} 度")
-            Text(text = "仰角 = ${uwbPosition.value?.elevation?.value} 度")
-
-            UwbArrow(
-                azimuth = uwbPosition.value?.azimuth?.value ?: 0f
-            )
-
-            val isCanvasInvert = remember { mutableStateOf(false) }
-            Row {
-                Text(text = "canvas を反転")
-                Switch(checked = isCanvasInvert.value, onCheckedChange = { isCanvasInvert.value = it })
+            val distanceValue = uwbPosition.value?.distance?.value
+            if (distanceValue != null) {
+                if(distanceValue <= 3) Text(text = "${distanceValue} = 範囲内")
             }
-            UwbPointCanvas(
-                modifier = Modifier.size(300.dp),
-                isInvert = isCanvasInvert.value,
-                distance = uwbPosition.value?.distance?.value ?: 0f,
-                azimuth = uwbPosition.value?.azimuth?.value ?: 0f
-            )
-            UwbRecordPointCanvas(
-                modifier = Modifier.size(300.dp),
-                isInvert = isCanvasInvert.value,
-                distance = uwbPosition.value?.distance?.value ?: 0f,
-                azimuth = uwbPosition.value?.azimuth?.value ?: 0f
-            )
         }
     }
 }
