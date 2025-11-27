@@ -1,11 +1,26 @@
 package io.github.takusan23.androidbleanduwbsample.ui.screen
 
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -13,11 +28,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.core.uwb.RangingParameters
 import androidx.core.uwb.RangingPosition
 import androidx.core.uwb.RangingResult
@@ -31,11 +53,33 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
+// Wifi aware
+import io.github.takusan23.androidbleanduwbsample.AwareManager
+import io.github.takusan23.androidbleanduwbsample.MainActivity
+
+import io.github.takusan23.androidbleanduwbsample.MessageCard
+
+private val REQUIRED_PERMISSION = listOf(
+    android.Manifest.permission.BLUETOOTH,
+    android.Manifest.permission.BLUETOOTH_CONNECT,
+    android.Manifest.permission.BLUETOOTH_SCAN,
+    android.Manifest.permission.BLUETOOTH_ADVERTISE,
+    android.Manifest.permission.ACCESS_COARSE_LOCATION,
+    android.Manifest.permission.ACCESS_FINE_LOCATION,
+    android.Manifest.permission.UWB_RANGING,
+    android.Manifest.permission.NEARBY_WIFI_DEVICES
+)
+
 /** Controller(Host) 側の画面 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ControllerScreen() {
     val context = LocalContext.current
+    val isGranted = remember {
+        mutableStateOf(REQUIRED_PERMISSION.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED })
+    }
+
+    val awareManager = MainActivity.awareManager//= remember { AwareManager(context)}
 
     // controlee の位置
     val uwbPosition = remember { mutableStateOf<RangingPosition?>(null) }
@@ -125,6 +169,107 @@ fun ControllerScreen() {
             val distanceValue = uwbPosition.value?.distance?.value
             if (distanceValue != null) {
                 if(distanceValue <= 3) Text(text = "${distanceValue} = 範囲内")
+            }
+        }
+    }
+
+
+    // ★受信メッセージを保存するリスト（状態）
+    // これに要素が追加されると、UIが自動的に更新されます
+    val messages = remember { mutableStateListOf<String>() }
+
+    val permissionRequest = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { isGranted.value = it.all { it.value } }
+    )
+
+    // 画面が表示されたときに、AwareManagerからの通知を受け取る設定をする
+    LaunchedEffect(Unit) {
+        awareManager.onMessageReceivedListener = { message ->
+            // メインスレッド以外から呼ばれる可能性を考慮して念のため
+            messages.add(0, message) // 新しいメッセージを上に追加
+        }
+    }
+
+    var pendingAction by remember { mutableStateOf<String?>(null) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        if (allGranted) {
+            Toast.makeText(context, "権限が許可されました", Toast.LENGTH_SHORT).show()
+            when (pendingAction) {
+                "Publish" -> {
+                    awareManager.connect()
+                    awareManager.startPublishing()
+                    messages.add(0, "システム: Publishを開始しました")
+                }
+                "Subscribe" -> {
+                    awareManager.connect()
+                    awareManager.startSubscribing()
+                    messages.add(0, "システム: Subscribeを開始しました")
+                }
+            }
+        } else {
+            Toast.makeText(context, "権限が必要です", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun checkPermissionsAndRun(action: String) {
+        if (isGranted.value) {
+            awareManager.connect()
+            if (action == "Publish") {
+                awareManager.startPublishing()
+                messages.add(0, "システム: Publishを開始しました")
+            } else {
+                awareManager.startSubscribing()
+                messages.add(0, "システム: Subscribeを開始しました")
+            }
+        } else {
+            pendingAction = action
+            permissionRequest.launch(REQUIRED_PERMISSION.toTypedArray())
+            permissionLauncher.launch(REQUIRED_PERMISSION.toTypedArray())
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Wi-Fi Aware 通信ログ",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        // 操作ボタンエリア
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Button(onClick = { checkPermissionsAndRun("Publish") }) {
+                Text("発信 (Pub)")
+            }
+            Button(onClick = { checkPermissionsAndRun("Subscribe") }) {
+                Text("探索 (Sub)")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Divider()
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ★メッセージ表示エリア (スクロール可能)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(messages) { msg ->
+                MessageCard(msg)
             }
         }
     }
