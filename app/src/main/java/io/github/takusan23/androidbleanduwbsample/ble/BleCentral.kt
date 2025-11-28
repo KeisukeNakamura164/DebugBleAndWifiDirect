@@ -88,7 +88,15 @@ class BleCentral(private val context: Context) {
             // onCharacteristicReadRequest で送られてきたデータを受け取る
             override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
                 super.onCharacteristicRead(gatt, characteristic, value, status)
-                _characteristicReadChannel.trySend(value)
+
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    println("BleCentral: Read成功 (${value.size} bytes)")
+                    _characteristicReadChannel.trySend(value)
+                } else {
+                    println("BleCentral: Read失敗！ Status=$status")
+                    // 失敗した場合は空の配列を送って処理を進める（止まらないように）
+                    _characteristicReadChannel.trySend(ByteArray(0))
+                }
             }
         })
 
@@ -108,9 +116,35 @@ class BleCentral(private val context: Context) {
     suspend fun readCharacteristic(): ByteArray {
         // GATT サーバーとの接続を待つ
         val gatt = _bluetoothGatt.filterNotNull().first()
-        // GATT サーバーへ狙ったサービス内にあるキャラクタリスティックへ read を試みる
-        val findService = gatt.services?.first { it.uuid == BleUuid.GATT_SERVICE_UUID }
-        val findCharacteristic = findService?.characteristics?.first { it.uuid == BleUuid.GATT_CHARACTERISTIC_UUID }
+
+        // サービス一覧が null の可能性も考慮して ?. を使う
+        val services = gatt.services ?: run {
+            println("BleCentral: サービスリストが取得できませんでした (null)")
+            return ByteArray(0)
+        }
+
+        // first ではなく firstOrNull を使い、見つからない場合は null を受け取る
+        val findService = services.firstOrNull { it.uuid == BleUuid.GATT_SERVICE_UUID }
+
+        // サービスが見つからなかった場合のデバッグログ
+        if (findService == null) {
+            println("BleCentral: 目的のサービスが見つかりません。")
+            println("探しているUUID: ${BleUuid.GATT_SERVICE_UUID}")
+            println("見つかったUUID一覧:")
+            services.forEach { println(" - ${it.uuid}") }
+            // ここで終了する（クラッシュさせない）
+            return ByteArray(0)
+        }
+
+        // キャラクタリスティックも同様に安全に探す
+        val findCharacteristic = findService.characteristics.firstOrNull { it.uuid == BleUuid.GATT_CHARACTERISTIC_UUID }
+
+        if (findCharacteristic == null) {
+            println("BleCentral: 目的のキャラクタリスティックが見つかりません。")
+            println("探しているUUID: ${BleUuid.GATT_CHARACTERISTIC_UUID}")
+            return ByteArray(0)
+        }
+
         // 結果は onCharacteristicRead で
         gatt.readCharacteristic(findCharacteristic)
         return _characteristicReadChannel.receive()

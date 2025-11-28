@@ -93,6 +93,14 @@ fun ControleeScreen() {
         val bleCentral = BleCentral(context)
         bleCentral.connectGattServer()
         val uwbControllerParamsByteArray = bleCentral.readCharacteristic()
+
+        // ★追加: データが空なら何もしない（ここで落ちていました）
+        if (uwbControllerParamsByteArray.isEmpty()) {
+            println("エラー: BLEからデータを受け取れませんでした")
+            bleCentral.destroy()
+            return@LaunchedEffect
+        }
+
         val uwbControllerParams = UwbControllerParams.decode(uwbControllerParamsByteArray)
         bleCentral.writeCharacteristic(addressByteArray)
         bleCentral.destroy()
