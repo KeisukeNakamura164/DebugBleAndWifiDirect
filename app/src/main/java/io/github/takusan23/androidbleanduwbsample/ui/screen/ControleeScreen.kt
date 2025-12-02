@@ -56,6 +56,9 @@ import io.github.takusan23.androidbleanduwbsample.MainActivity
 
 import io.github.takusan23.androidbleanduwbsample.MessageCard
 
+import android.content.Intent // ★追加
+import io.github.takusan23.androidbleanduwbsample.WifiDirect // ★追加
+
 private val REQUIRED_PERMISSION = listOf(
     android.Manifest.permission.BLUETOOTH,
     android.Manifest.permission.BLUETOOTH_CONNECT,
@@ -147,6 +150,19 @@ fun ControleeScreen() {
             val distanceValue = uwbPosition.value?.distance?.value
             if (distanceValue != null) {
                 if (distanceValue <= 3) Text(text = "範囲内")
+            }
+
+            Button(
+                onClick = {
+                    // WifiDirect Activity を起動
+                    val intent = Intent(context, WifiDirect::class.java)
+                    context.startActivity(intent)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+            ) {
+                Text("Wi-Fi Direct を起動する")
             }
         }
     }

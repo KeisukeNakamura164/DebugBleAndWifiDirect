@@ -344,7 +344,7 @@ class WifiDirect : ComponentActivity() {
 
         // UIをJetpack Composeで構築
         setContent {
-            WIFIDIRECTTheme {
+            MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     WifiDirectApp(
                         isWifiP2pEnabled = isWifiP2pEnabled,
@@ -471,7 +471,7 @@ class WifiDirect : ComponentActivity() {
 
         val config = WifiP2pConfig().apply {
             deviceAddress = device.deviceAddress
-            groupOwnerIntent = 15 // 自身がGroup Ownerになりたい度合い (0-15)
+            groupOwnerIntent = 0 // 自身がGroup Ownerになりたい度合い (0-15)
         }
 
         manager.connect(channel, config, object : WifiP2pManager.ActionListener {
@@ -536,7 +536,7 @@ class WifiDirect : ComponentActivity() {
             lifecycleScope.launch {
 
                 //１．(サーバ)まずクライアントからのデータを受信する(startServer)．クライアントのIPアドレスも取得する．
-                val serverResult = startServer(this@MainActivity)
+                val serverResult = startServer(this@WifiDirect)
                 val receivedJsonContent = serverResult.receivedData
                 val clientIpAddress = serverResult.clientIp //クライアントのIPを取得
 
@@ -555,7 +555,7 @@ class WifiDirect : ComponentActivity() {
                     Log.e("MainActivity", "Server: Could not get Client IP. Cannot send back.")
                     chatMessages = chatMessages + "[送信先のIPアドレスが取得できないため返信できません]"
                 } else {
-                    val jsonStringToSend = loadAndPrepareMyAccountJson(this@MainActivity)
+                    val jsonStringToSend = loadAndPrepareMyAccountJson(this@WifiDirect)
 
                     if (jsonStringToSend == null) {
                         Log.e("MainActivity", "Server: Failed to load MyAccout JSON.")
@@ -588,7 +588,7 @@ class WifiDirect : ComponentActivity() {
                 lifecycleScope.launch {
 
                     //１．(クライアント)まずサーバのIP宛に自分のデータを送信する(startClient)
-                    val jsonStringToSend = loadAndPrepareMyAccountJson(this@MainActivity) // 送信するJSON
+                    val jsonStringToSend = loadAndPrepareMyAccountJson(this@WifiDirect) // 送信するJSON
                     if (jsonStringToSend == null) {
                         Log.e("MainActivity", "Client: Failed to load or prepare MyAccount JSON.")
                         chatMessages = chatMessages + "[自分のアカウント情報(myaccount.json)が読み込めません]"
@@ -608,7 +608,7 @@ class WifiDirect : ComponentActivity() {
                     //４．(クライアント)次にサーバから受信する(返信待ち)(startServer)
                     Log.d("MainActivity", "Client: Noe waiting for data from server...")
 
-                    val serverResult = startServer(this@MainActivity)
+                    val serverResult = startServer(this@WifiDirect)
                     val receivedJsonContent = serverResult.receivedData
                     if (receivedJsonContent != null) {
                         Log.d("MainActivity", "Client: Received JSON from Server: '$receivedJsonContent'")
@@ -632,7 +632,7 @@ class WifiDirect : ComponentActivity() {
     inner class WiFiDirectBroadcastReceiver(
         private val manager: WifiP2pManager,
         private val channel: WifiP2pManager.Channel,
-        private val activity: io.github.takusan23.androidbleanduwbsample.MainActivity
+        private val activity: WifiDirect
     ) : BroadcastReceiver() {
 
         @SuppressLint("MissingPermission")
