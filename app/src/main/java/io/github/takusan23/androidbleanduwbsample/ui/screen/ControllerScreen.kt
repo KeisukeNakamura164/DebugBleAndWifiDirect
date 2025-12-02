@@ -1,5 +1,6 @@
 package io.github.takusan23.androidbleanduwbsample.ui.screen
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -12,18 +13,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -46,6 +41,7 @@ import androidx.core.uwb.RangingResult
 import androidx.core.uwb.UwbDevice
 import androidx.core.uwb.UwbManager
 import io.github.takusan23.androidbleanduwbsample.UwbControllerParams
+import io.github.takusan23.androidbleanduwbsample.WifiDirect
 import io.github.takusan23.androidbleanduwbsample.ble.BlePeripheral
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterNotNull
@@ -53,14 +49,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-// Wifi aware
-import io.github.takusan23.androidbleanduwbsample.AwareManager
-import io.github.takusan23.androidbleanduwbsample.MainActivity
-
-import io.github.takusan23.androidbleanduwbsample.MessageCard
-
-import android.content.Intent // ★追加
-import io.github.takusan23.androidbleanduwbsample.WifiDirect // ★追加
+// Wifi aware 関連はコメントアウト
+// import io.github.takusan23.androidbleanduwbsample.AwareManager
+// import io.github.takusan23.androidbleanduwbsample.MainActivity
+// import io.github.takusan23.androidbleanduwbsample.MessageCard
 
 private val REQUIRED_PERMISSION = listOf(
     android.Manifest.permission.BLUETOOTH,
@@ -82,7 +74,12 @@ fun ControllerScreen() {
         mutableStateOf(REQUIRED_PERMISSION.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED })
     }
 
-    val awareManager = MainActivity.awareManager//= remember { AwareManager(context)}
+    // AwareManager は使わないのでコメントアウト
+    // val awareManager = MainActivity.awareManager
+
+    // ★追加: ボタンから参照できるように状態変数として定義
+    var uwbControllerParams by remember { mutableStateOf<UwbControllerParams?>(null) }
+    var controleeAddress by remember { mutableStateOf<ByteArray?>(null) }
 
     // controlee の位置
     val uwbPosition = remember { mutableStateOf<RangingPosition?>(null) }
@@ -93,20 +90,22 @@ fun ControllerScreen() {
         val controllerSession = uwbManager.controllerSessionScope()
 
         // ゲスト側へ送るパラメーターを ByteArray にして送る
-        // sessionId / sessionKeyInfo はサンプルコードでも適当に作ってるので適当に作る
-        // https://github.com/android/connectivity-samples/blob/777517eb2898cd48e139446246808a2106d343cc/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/impl/NearbyControllerConnector.kt#L69
         val sessionId = Random.nextInt()
         val sessionKeyInfo = Random.nextBytes(8)
+
         // Serializable な data class にして ByteArray にエンコードする
-        val uwbControllerParams = UwbControllerParams(
+        val params = UwbControllerParams(
             address = controllerSession.localAddress.address,
             channel = controllerSession.uwbComplexChannel.channel,
             preambleIndex = controllerSession.uwbComplexChannel.preambleIndex,
             sessionId = sessionId,
             sessionKeyInfo = sessionKeyInfo
         )
+        // ★状態変数に保存 (これでボタンから参照できるようになる)
+        uwbControllerParams = params
+
         // バイト配列に
-        val encodeHostParameter = UwbControllerParams.encode(uwbControllerParams)
+        val encodeHostParameter = UwbControllerParams.encode(params)
 
         // Controlee 側からアドレスが送られてきたら入れる Flow
         val controleeAddressFlow = MutableStateFlow<ByteArray?>(null)
@@ -128,14 +127,18 @@ fun ControllerScreen() {
         }
 
         // アドレスが送られてきたらペリフェラル終了
-        val controleeAddress = controleeAddressFlow.filterNotNull().first()
+        val address = controleeAddressFlow.filterNotNull().first()
+        // ★状態変数に保存
+        controleeAddress = address
+
         peripheralJob.cancel()
 
         // RangingParameters を作り UWB 接続を開始する
         val rangingParameters = RangingParameters(
             uwbConfigType = RangingParameters.CONFIG_MULTICAST_DS_TWR,
             complexChannel = controllerSession.uwbComplexChannel,
-            peerDevices = listOf(UwbDevice.createForAddress(controleeAddress)),
+            // ★保存した address を使う
+            peerDevices = listOf(UwbDevice.createForAddress(address)),
             updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC,
             sessionId = sessionId,
             sessionKeyInfo = sessionKeyInfo,
@@ -176,9 +179,27 @@ fun ControllerScreen() {
 
             Button(
                 onClick = {
-                    // WifiDirect Activity を起動
-                    val intent = Intent(context, WifiDirect::class.java)
-                    context.startActivity(intent)
+                    // ★修正: 状態変数の中身をローカル変数に取り出す
+                    // これでスマートキャストのエラーを防ぎます
+                    val params = uwbControllerParams
+                    val address = controleeAddress
+
+                    // 中身があるかチェック
+                    if (params != null && address != null) {
+                        // WifiDirect Activity を起動
+                        val intent = Intent(context, WifiDirect::class.java).apply {
+                            // 1. Controller用の設定
+                            putExtra("UWB_PARAMS", params)
+                            // 2. 相手のアドレス
+                            putExtra("PEER_ADDRESS", address)
+                            // 3. 自分の役割 (ホスト)
+                            putExtra("IS_CONTROLLER", true)
+                        }
+                        context.startActivity(intent)
+                    } else {
+                        // まだ通信が完了していない場合
+                        Toast.makeText(context, "UWB接続準備中です...相手と接続してください", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -189,9 +210,8 @@ fun ControllerScreen() {
         }
     }
 
-
-    // ★受信メッセージを保存するリスト（状態）
-    // これに要素が追加されると、UIが自動的に更新されます
+    // --- 以下、Wi-Fi Aware 関連のコードは全てコメントアウト ---
+    /*
     val messages = remember { mutableStateListOf<String>() }
 
     val permissionRequest = rememberLauncherForActivityResult(
@@ -199,11 +219,9 @@ fun ControllerScreen() {
         onResult = { isGranted.value = it.all { it.value } }
     )
 
-    // 画面が表示されたときに、AwareManagerからの通知を受け取る設定をする
     LaunchedEffect(Unit) {
         awareManager.onMessageReceivedListener = { message ->
-            // メインスレッド以外から呼ばれる可能性を考慮して念のため
-            messages.add(0, message) // 新しいメッセージを上に追加
+            messages.add(0, message)
         }
     }
 
@@ -289,4 +307,5 @@ fun ControllerScreen() {
             }
         }
     }
+    */
 }

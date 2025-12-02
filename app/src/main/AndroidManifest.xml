@@ -42,7 +42,8 @@
 
         <activity
             android:name=".WifiDirect"
-            android:exported="false" />
+            android:exported="false"
+            android:label="Wi-Fi Direct Chat"/>
     </application>
 
 </manifest>

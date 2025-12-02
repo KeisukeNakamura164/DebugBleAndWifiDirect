@@ -83,9 +83,11 @@ fun ControleeScreen() {
     //val awareManager = MainActivity.awareManager//= remember { AwareManager(context)}
 
     // controller の位置
+    var uwbControllerParams by remember { mutableStateOf<UwbControllerParams?>(null) }
+
     val uwbPosition = remember { mutableStateOf<RangingPosition?>(null) }
 
-    /*
+
     LaunchedEffect(key1 = Unit) {
         val uwbManager = UwbManager.createInstance(context)
         val controleeSession = uwbManager.controleeSessionScope()
@@ -105,18 +107,20 @@ fun ControleeScreen() {
             return@LaunchedEffect
         }
 
-        val uwbControllerParams = UwbControllerParams.decode(uwbControllerParamsByteArray)
+        val params = UwbControllerParams.decode(uwbControllerParamsByteArray)
         bleCentral.writeCharacteristic(addressByteArray)
         bleCentral.destroy()
+
+        uwbControllerParams = params
 
         // RangingParameters を作り UWB 接続を開始する
         val rangingParameters = RangingParameters(
             uwbConfigType = RangingParameters.CONFIG_MULTICAST_DS_TWR,
-            complexChannel = UwbComplexChannel(uwbControllerParams.channel, uwbControllerParams.preambleIndex),
-            peerDevices = listOf(UwbDevice.createForAddress(uwbControllerParams.address)),
+            complexChannel = UwbComplexChannel(params.channel, params.preambleIndex),
+            peerDevices = listOf(UwbDevice.createForAddress(params.address)),
             updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC,
-            sessionId = uwbControllerParams.sessionId,
-            sessionKeyInfo = uwbControllerParams.sessionKeyInfo,
+            sessionId = params.sessionId,
+            sessionKeyInfo = params.sessionKeyInfo,
             subSessionId = 0, // SESSION_ID_UNSET ？
             subSessionKeyInfo = null // ？
         )
@@ -135,7 +139,7 @@ fun ControleeScreen() {
             }
         }
     }
-     */
+
 
     Scaffold(
         topBar = {
@@ -154,11 +158,26 @@ fun ControleeScreen() {
                 if (distanceValue <= 3) Text(text = "範囲内")
             }
 
+            // ControleeScreen.kt
+
+// ... (省略) ...
+
             Button(
                 onClick = {
-                    // WifiDirect Activity を起動
-                    val intent = Intent(context, WifiDirect::class.java)
-                    context.startActivity(intent)
+                    // ★修正: 一度ローカル変数 'params' に代入する（これが重要！）
+                    // これでコンパイラは「値が勝手に変わらない」と認識できます
+                    val params = uwbControllerParams
+
+                    // 代入した 'params' に対して null チェックを行う
+                    if (params != null) {
+                        val intent = Intent(context, WifiDirect::class.java).apply {
+                            putExtra("UWB_PARAMS", params) // ここも params を使う
+                            putExtra("IS_CONTROLLER", false)
+                        }
+                        context.startActivity(intent)
+                    } else {
+                        Toast.makeText(context, "UWB接続準備中です...", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -166,6 +185,7 @@ fun ControleeScreen() {
             ) {
                 Text("Wi-Fi Direct を起動する")
             }
+// ... (省略) ...
         }
     }
 

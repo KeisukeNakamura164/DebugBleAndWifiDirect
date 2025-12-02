@@ -130,7 +130,8 @@ fun WifiDirectApp(
     onConnectPeer: (WifiP2pDevice) -> Unit,
     connectionInfo: WifiP2pInfo?,
     chatMessages: List<String>,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    uwbDistance: String
 ) {
     Column(
         modifier = Modifier
@@ -153,6 +154,26 @@ fun WifiDirectApp(
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 Text(text = "Status: ${if (isWifiP2pEnabled) "Enabled" else "Disabled"}")
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE0F7FA)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .border(1.dp, Color(0xFF006064), RoundedCornerShape(8.dp))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("UWB Distance", fontSize = 14.sp, color = Color.Gray)
+                        Text(
+                            text = uwbDistance,
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF006064)
+                        )
+                    }
+                }
                 Text(text = "My Device: ${thisDevice?.deviceName ?: "Unknown"}")
                 Text(text = "Address: ${thisDevice?.deviceAddress ?: "Unknown"}")
             }

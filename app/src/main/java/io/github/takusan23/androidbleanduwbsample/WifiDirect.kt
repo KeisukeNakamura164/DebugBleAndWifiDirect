@@ -48,6 +48,19 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.collections.plus
 
+// WifiDirect.kt の冒頭に追加
+
+import androidx.core.uwb.*
+import io.github.takusan23.androidbleanduwbsample.UwbControllerParams
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 
 
 // ** 送受信ポート番号 (両デバイスで一致させる) **
@@ -225,6 +238,8 @@ class WifiDirect : ComponentActivity() {
     private var connectionInfo by mutableStateOf<WifiP2pInfo?>(null)
     private var chatMessages by mutableStateOf<List<String>>(emptyList()) // チャット履歴
 
+    private var uwbDistance by mutableStateOf("UWB待機中...")
+
     // --- P2Pリスナー ---
     // discoverPeers用関数
     private val peerListListener = WifiP2pManager.PeerListListener { peerList ->
@@ -318,8 +333,85 @@ class WifiDirect : ComponentActivity() {
             }
         }
 
+    // ★追加: UWB再開ロジック
+    private fun startUwbRangingIfPossible() {
+        // Intentからデータを取り出す
+        val isController = intent.getBooleanExtra("IS_CONTROLLER", false)
+        val params = intent.getSerializableExtra("UWB_PARAMS") as? UwbControllerParams
+        val peerAddress = intent.getByteArrayExtra("PEER_ADDRESS")
+
+        if (params == null) {
+            uwbDistance = "UWB情報なし"
+            return
+        }
+
+        lifecycleScope.launch {
+            try {
+                val uwbManager = UwbManager.createInstance(this@WifiDirect)
+
+                // 親か子かでセッションを作り分ける
+                val clientSessionScope = if (isController) {
+                    uwbManager.controllerSessionScope()
+                } else {
+                    uwbManager.controleeSessionScope()
+                }
+
+                // 相手のアドレスを確定させる
+                val peerUwbAddress = if (isController) {
+                    // 親の場合：Intentでもらった相手のアドレスを使う
+                    if (peerAddress == null) {
+                        uwbDistance = "相手アドレス不明"
+                        return@launch
+                    }
+                    UwbDevice.createForAddress(peerAddress)
+                } else {
+                    // 子の場合：パラメータの中に親のアドレスが入っている
+                    UwbDevice.createForAddress(params.address)
+                }
+
+                // 測距パラメータ設定
+                val complexChannel = UwbComplexChannel(params.channel, params.preambleIndex)
+                val rangingParameters = RangingParameters(
+                    uwbConfigType = RangingParameters.CONFIG_MULTICAST_DS_TWR,
+                    complexChannel = complexChannel,
+                    peerDevices = listOf(peerUwbAddress),
+                    updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC,
+                    sessionId = params.sessionId,
+                    sessionKeyInfo = params.sessionKeyInfo,
+                    subSessionId = 0,
+                    subSessionKeyInfo = null
+                )
+
+                // 計測開始！
+                Log.d("UWB", "WifiDirect画面でUWB再開！")
+                clientSessionScope.prepareSession(rangingParameters).collect { result ->
+                    when (result) {
+                        is RangingResult.RangingResultPosition -> {
+                            // 距離更新
+                            val dist = result.position.distance?.value
+                            uwbDistance = if (dist != null) {
+                                "距離: %.2f m".format(dist)
+                            } else {
+                                "距離: 不明"
+                            }
+                        }
+
+                        is RangingResult.RangingResultPeerDisconnected -> {
+                            uwbDistance = "UWB切断"
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("UWB", "Error: ${e.message}")
+                uwbDistance = "UWBエラー"
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        startUwbRangingIfPossible()
 
         manager = getSystemService(WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager.initialize(this, mainLooper, null)
@@ -357,6 +449,7 @@ class WifiDirect : ComponentActivity() {
                         connectionInfo = connectionInfo,
                         chatMessages = chatMessages,
                         onDisconnect = { disconnect() }, // disconnect() 関数を渡す
+                        uwbDistance = uwbDistance
                     )
                 }
             }
