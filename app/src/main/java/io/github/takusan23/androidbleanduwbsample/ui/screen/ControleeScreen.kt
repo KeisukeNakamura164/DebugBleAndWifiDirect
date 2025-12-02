@@ -80,11 +80,12 @@ fun ControleeScreen() {
         mutableStateOf(REQUIRED_PERMISSION.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED })
     }
 
-    val awareManager = MainActivity.awareManager//= remember { AwareManager(context)}
+    //val awareManager = MainActivity.awareManager//= remember { AwareManager(context)}
 
     // controller の位置
     val uwbPosition = remember { mutableStateOf<RangingPosition?>(null) }
 
+    /*
     LaunchedEffect(key1 = Unit) {
         val uwbManager = UwbManager.createInstance(context)
         val controleeSession = uwbManager.controleeSessionScope()
@@ -134,6 +135,7 @@ fun ControleeScreen() {
             }
         }
     }
+     */
 
     Scaffold(
         topBar = {
@@ -179,12 +181,14 @@ fun ControleeScreen() {
     )
 
     // 画面が表示されたときに、AwareManagerからの通知を受け取る設定をする
+    /*
     LaunchedEffect(Unit) {
         awareManager.onMessageReceivedListener = { message ->
             // メインスレッド以外から呼ばれる可能性を考慮して念のため
             messages.add(0, message) // 新しいメッセージを上に追加
         }
     }
+     */
 
     var pendingAction by remember { mutableStateOf<String?>(null) }
 
@@ -196,13 +200,13 @@ fun ControleeScreen() {
             Toast.makeText(context, "権限が許可されました", Toast.LENGTH_SHORT).show()
             when (pendingAction) {
                 "Publish" -> {
-                    awareManager.connect()
-                    awareManager.startPublishing()
+                //    awareManager.connect()
+                //    awareManager.startPublishing()
                     messages.add(0, "システム: Publishを開始しました")
                 }
                 "Subscribe" -> {
-                    awareManager.connect()
-                    awareManager.startSubscribing()
+                //    awareManager.connect()
+                //    awareManager.startSubscribing()
                     messages.add(0, "システム: Subscribeを開始しました")
                 }
             }
@@ -214,12 +218,12 @@ fun ControleeScreen() {
 
     fun checkPermissionsAndRun(action: String) {
         if (isGranted.value) {
-            awareManager.connect()
+            //awareManager.connect()
             if (action == "Publish") {
-                awareManager.startPublishing()
+            //    awareManager.startPublishing()
                 messages.add(0, "システム: Publishを開始しました")
             } else {
-                awareManager.startSubscribing()
+            //    awareManager.startSubscribing()
                 messages.add(0, "システム: Subscribeを開始しました")
             }
         } else {
@@ -229,6 +233,7 @@ fun ControleeScreen() {
         }
     }
 
+    /*
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -246,13 +251,14 @@ fun ControleeScreen() {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
+        ) {/*
             Button(onClick = { checkPermissionsAndRun("Publish") }) {
                 Text("発信 (Pub)")
             }
             Button(onClick = { checkPermissionsAndRun("Subscribe") }) {
                 Text("探索 (Sub)")
             }
+            */
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -269,4 +275,5 @@ fun ControleeScreen() {
             }
         }
     }
+     */
 }

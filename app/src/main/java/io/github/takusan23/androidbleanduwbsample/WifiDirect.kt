@@ -524,13 +524,24 @@ class WifiDirect : ComponentActivity() {
      * ここで「サーバー(GO)」と「クライアント」の役割を判断し、
      * 相互通信のシーケンス（受信→返信 / 送信→受信）を開始する
      */
+
+    private var isServerRunning = false
+
     private val connectionInfoListener = WifiP2pManager.ConnectionInfoListener { info ->
 
         connectionInfo = info // Compose UIに状態を通知
 
         //自分がグループオーナー=サーバ側の処理
         if (info.groupFormed && info.isGroupOwner) {
+
+            if (isServerRunning) {
+                Log.d("MainActivity", "Server is already running. Ignoring duplicate call.")
+                return@ConnectionInfoListener
+            }
+
             Log.d("MainActivity", "I am the Group Owner. Starting server...")
+
+            isServerRunning = true
 
             // 🚀 CoroutineScope (lifecycleScope) を使用
             lifecycleScope.launch {
