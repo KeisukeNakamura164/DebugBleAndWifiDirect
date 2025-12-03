@@ -48,7 +48,7 @@ import io.github.takusan23.androidbleanduwbsample.ui.screen.ControleeScreen
 import io.github.takusan23.androidbleanduwbsample.ui.screen.ControllerScreen
 import io.github.takusan23.androidbleanduwbsample.ui.screen.HomeScreen
 import io.github.takusan23.androidbleanduwbsample.ui.theme.AndroidBleAndUwbSampleTheme
-
+//コメント
 class MainActivity : ComponentActivity() {
     // aware追加分
     companion object {
