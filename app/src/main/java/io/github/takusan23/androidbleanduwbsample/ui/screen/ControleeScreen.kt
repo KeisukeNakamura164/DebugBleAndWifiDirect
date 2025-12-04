@@ -51,7 +51,7 @@ import io.github.takusan23.androidbleanduwbsample.ble.BleCentral
 import kotlinx.coroutines.launch
 
 // Wifi aware
-import io.github.takusan23.androidbleanduwbsample.AwareManager
+import io.github.takusan23.androidbleanduwbsample.BleManager
 import io.github.takusan23.androidbleanduwbsample.MainActivity
 
 import io.github.takusan23.androidbleanduwbsample.MessageCard
@@ -77,7 +77,7 @@ fun ControleeScreen() {
         mutableStateOf(REQUIRED_PERMISSION.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED })
     }
 
-    val awareManager = MainActivity.awareManager//= remember { AwareManager(context)}
+    val bleManager = MainActivity.bleManager//= remember { BleManager(context)}
 
     // controller の位置
     val uwbPosition = remember { mutableStateOf<RangingPosition?>(null) }
@@ -154,13 +154,15 @@ fun ControleeScreen() {
         onResult = { isGranted.value = it.all { it.value } }
     )
 
-    // 画面が表示されたときに、AwareManagerからの通知を受け取る設定をする
+    /*
+    // 画面が表示されたときに、BleManagerからの通知を受け取る設定をする
     LaunchedEffect(Unit) {
-        awareManager.onMessageReceivedListener = { message ->
+        bleManager.onMessageReceivedListener = { message ->
             // メインスレッド以外から呼ばれる可能性を考慮して念のため
             messages.add(0, message) // 新しいメッセージを上に追加
         }
     }
+    */
 
     var pendingAction by remember { mutableStateOf<String?>(null) }
 
@@ -172,13 +174,13 @@ fun ControleeScreen() {
             Toast.makeText(context, "権限が許可されました", Toast.LENGTH_SHORT).show()
             when (pendingAction) {
                 "Publish" -> {
-                    awareManager.connect()
-                    awareManager.startPublishing()
+                    bleManager.startScan()
+                    bleManager.startAdvertising()
                     messages.add(0, "システム: Publishを開始しました")
                 }
                 "Subscribe" -> {
-                    awareManager.connect()
-                    awareManager.startSubscribing()
+                    bleManager.startScan()
+                    bleManager.startAdvertising()
                     messages.add(0, "システム: Subscribeを開始しました")
                 }
             }
@@ -190,12 +192,13 @@ fun ControleeScreen() {
 
     fun checkPermissionsAndRun(action: String) {
         if (isGranted.value) {
-            awareManager.connect()
             if (action == "Publish") {
-                awareManager.startPublishing()
+                bleManager.startScan()
+                bleManager.startAdvertising()
                 messages.add(0, "システム: Publishを開始しました")
             } else {
-                awareManager.startSubscribing()
+                bleManager.startScan()
+                bleManager.startAdvertising()
                 messages.add(0, "システム: Subscribeを開始しました")
             }
         } else {

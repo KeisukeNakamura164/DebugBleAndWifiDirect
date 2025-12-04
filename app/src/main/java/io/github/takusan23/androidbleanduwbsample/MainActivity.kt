@@ -52,24 +52,24 @@ import io.github.takusan23.androidbleanduwbsample.ui.theme.AndroidBleAndUwbSampl
 class MainActivity : ComponentActivity() {
     // aware追加分
     companion object {
-        lateinit var awareManager: AwareManager
+        lateinit var bleManager: BleManager
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         // aware追加分
-        awareManager = AwareManager(this)
+        bleManager = BleManager(this)
 
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             AndroidBleAndUwbSampleTheme {
-                MainScreen(awareManager)
+                MainScreen(bleManager)
             }
         }
     }
 }
 
 @Composable
-private fun MainScreen(awareManager: AwareManager) {
+private fun MainScreen(bleManager: BleManager) {
     val navController = rememberNavController()
 
     NavHost(navController = navController, startDestination = "home") {
