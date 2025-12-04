@@ -4,247 +4,187 @@ import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.core.uwb.RangingParameters
-import androidx.core.uwb.RangingPosition
-import androidx.core.uwb.RangingResult
-import androidx.core.uwb.UwbComplexChannel
-import androidx.core.uwb.UwbDevice
-import androidx.core.uwb.UwbManager
+import androidx.core.uwb.*
+import io.github.takusan23.androidbleanduwbsample.MainActivity
+import io.github.takusan23.androidbleanduwbsample.MessageCard
 import io.github.takusan23.androidbleanduwbsample.UwbControllerParams
 import io.github.takusan23.androidbleanduwbsample.ble.BleCentral
 import kotlinx.coroutines.launch
 
-// Wifi aware
-import io.github.takusan23.androidbleanduwbsample.BleManager
-import io.github.takusan23.androidbleanduwbsample.MainActivity
-
-import io.github.takusan23.androidbleanduwbsample.MessageCard
-
 private val REQUIRED_PERMISSION = listOf(
-    android.Manifest.permission.BLUETOOTH,
     android.Manifest.permission.BLUETOOTH_CONNECT,
     android.Manifest.permission.BLUETOOTH_SCAN,
-    android.Manifest.permission.BLUETOOTH_ADVERTISE,
-    android.Manifest.permission.ACCESS_COARSE_LOCATION,
     android.Manifest.permission.ACCESS_FINE_LOCATION,
-    android.Manifest.permission.UWB_RANGING,
-    android.Manifest.permission.NEARBY_WIFI_DEVICES
+    android.Manifest.permission.UWB_RANGING
 )
 
-/** Controlee(Guest) 側の画面 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ControleeScreen() {
     val context = LocalContext.current
+    val bleManager = MainActivity.bleManager
 
+    // UWBの状態
+    var uwbDistanceText by remember { mutableStateOf("未接続") }
+    var currentDistanceMeters by remember { mutableStateOf<Float?>(null) }
+
+    // ログ
+    val experimentLogs = remember { mutableStateListOf<String>() }
+
+    // BLEの状態監視
+    val receivedMessage by bleManager.receivedMessage.collectAsState()
+    val isScanning by bleManager.isScanning.collectAsState()
+
+    // 権限
     val isGranted = remember {
-        mutableStateOf(REQUIRED_PERMISSION.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED })
+        mutableStateOf(REQUIRED_PERMISSION.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        })
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        isGranted.value = result.values.all { it }
     }
 
-    val bleManager = MainActivity.bleManager//= remember { BleManager(context)}
-
-    // controller の位置
-    val uwbPosition = remember { mutableStateOf<RangingPosition?>(null) }
-
+    // UWB初期化
     LaunchedEffect(key1 = Unit) {
-        val uwbManager = UwbManager.createInstance(context)
-        val controleeSession = uwbManager.controleeSessionScope()
+        if (!isGranted.value) return@LaunchedEffect
 
-        // controller に送る
-        val addressByteArray = controleeSession.localAddress.address
+        try {
+            val uwbManager = UwbManager.createInstance(context)
+            val controleeSession = uwbManager.controleeSessionScope()
 
-        // BLE GATT サーバーへ接続し、UWB ホストと接続に必要なパラメーターを送受信する
-        val bleCentral = BleCentral(context)
-        bleCentral.connectGattServer()
-        val uwbControllerParamsByteArray = bleCentral.readCharacteristic()
-        val uwbControllerParams = UwbControllerParams.decode(uwbControllerParamsByteArray)
-        bleCentral.writeCharacteristic(addressByteArray)
-        bleCentral.destroy()
+            // Setup用BLE (BleCentral) 開始
+            val bleCentral = BleCentral(context)
+            bleCentral.connectGattServer()
 
-        // RangingParameters を作り UWB 接続を開始する
-        val rangingParameters = RangingParameters(
-            uwbConfigType = RangingParameters.CONFIG_MULTICAST_DS_TWR,
-            complexChannel = UwbComplexChannel(uwbControllerParams.channel, uwbControllerParams.preambleIndex),
-            peerDevices = listOf(UwbDevice.createForAddress(uwbControllerParams.address)),
-            updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC,
-            sessionId = uwbControllerParams.sessionId,
-            sessionKeyInfo = uwbControllerParams.sessionKeyInfo,
-            subSessionId = 0, // SESSION_ID_UNSET ？
-            subSessionKeyInfo = null // ？
-        )
+            // パラメータ取得
+            val uwbControllerParamsByteArray = bleCentral.readCharacteristic()
+            val uwbControllerParams = UwbControllerParams.decode(uwbControllerParamsByteArray)
 
-        launch {
-            controleeSession.prepareSession(rangingParameters).collect { rangingResult ->
-                when (rangingResult) {
-                    is RangingResult.RangingResultPosition -> {
-                        uwbPosition.value = rangingResult.position
-                    }
+            // 自分のアドレスを通知
+            bleCentral.writeCharacteristic(controleeSession.localAddress.address)
+            bleCentral.destroy() // Setup完了
 
-                    is RangingResult.RangingResultPeerDisconnected -> {
-                        uwbPosition.value = null
+            // UWB Ranging
+            val rangingParameters = RangingParameters(
+                uwbConfigType = RangingParameters.CONFIG_MULTICAST_DS_TWR,
+                complexChannel = UwbComplexChannel(uwbControllerParams.channel, uwbControllerParams.preambleIndex),
+                peerDevices = listOf(UwbDevice.createForAddress(uwbControllerParams.address)),
+                updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC,
+                sessionId = uwbControllerParams.sessionId,
+                sessionKeyInfo = uwbControllerParams.sessionKeyInfo,
+                subSessionId = 0,
+                subSessionKeyInfo = null
+            )
+
+            launch {
+                controleeSession.prepareSession(rangingParameters).collect { result ->
+                    when (result) {
+                        is RangingResult.RangingResultPosition -> {
+                            result.position.distance?.value?.let { dist ->
+                                currentDistanceMeters = dist
+                                uwbDistanceText = "%.2fm".format(dist)
+                            }
+                        }
+                        is RangingResult.RangingResultPeerDisconnected -> {
+                            uwbDistanceText = "切断"
+                            currentDistanceMeters = null
+                        }
                     }
                 }
             }
+        } catch (e: Exception) {
+            uwbDistanceText = "エラー: ${e.message}"
+        }
+    }
+
+    // メッセージ受信検知（Controllerからの返信）
+    LaunchedEffect(receivedMessage) {
+        if (receivedMessage.isNotEmpty()) {
+            val distStr = currentDistanceMeters?.let { "%.2fm".format(it) } ?: "不明"
+            val log = "完了: $receivedMessage\n(距離: $distStr)"
+            experimentLogs.add(0, log)
         }
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(title = { Text(text = "UWB Controlee") })
-        }
+        topBar = { TopAppBar(title = { Text("Controlee (Guest)") }) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // null になりえるので注意
-            Text(text = "距離 = ${uwbPosition.value?.distance?.value} m")
-            val distanceValue = uwbPosition.value?.distance?.value
-            if (distanceValue != null) {
-                if (distanceValue <= 3) Text(text = "範囲内")
-            }
-        }
-    }
-
-
-
-    // ★受信メッセージを保存するリスト（状態）
-    // これに要素が追加されると、UIが自動的に更新されます
-    val messages = remember { mutableStateListOf<String>() }
-
-    val permissionRequest = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions(),
-        onResult = { isGranted.value = it.all { it.value } }
-    )
-
-    /*
-    // 画面が表示されたときに、BleManagerからの通知を受け取る設定をする
-    LaunchedEffect(Unit) {
-        bleManager.onMessageReceivedListener = { message ->
-            // メインスレッド以外から呼ばれる可能性を考慮して念のため
-            messages.add(0, message) // 新しいメッセージを上に追加
-        }
-    }
-    */
-
-    var pendingAction by remember { mutableStateOf<String?>(null) }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.values.all { it }
-        if (allGranted) {
-            Toast.makeText(context, "権限が許可されました", Toast.LENGTH_SHORT).show()
-            when (pendingAction) {
-                "Publish" -> {
-                    bleManager.startScan()
-                    bleManager.startAdvertising()
-                    messages.add(0, "システム: Publishを開始しました")
-                }
-                "Subscribe" -> {
-                    bleManager.startScan()
-                    bleManager.startAdvertising()
-                    messages.add(0, "システム: Subscribeを開始しました")
+            // UWBステータス
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("UWB 距離計測", fontSize = 14.sp)
+                    Text(uwbDistanceText, fontSize = 32.sp, style = MaterialTheme.typography.headlineMedium)
                 }
             }
-        } else {
-            Toast.makeText(context, "権限が必要です", Toast.LENGTH_LONG).show()
-        }
-        pendingAction = null
-    }
 
-    fun checkPermissionsAndRun(action: String) {
-        if (isGranted.value) {
-            if (action == "Publish") {
-                bleManager.startScan()
-                bleManager.startAdvertising()
-                messages.add(0, "システム: Publishを開始しました")
+            // 操作ボタン
+            if (!isGranted.value) {
+                Button(onClick = { permissionLauncher.launch(REQUIRED_PERMISSION.toTypedArray()) }) {
+                    Text("権限を許可する")
+                }
             } else {
-                bleManager.startScan()
-                bleManager.startAdvertising()
-                messages.add(0, "システム: Subscribeを開始しました")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            // スキャン開始 -> 見つかれば接続 -> 送信 -> 受信 -> 切断 まで自動
+                            bleManager.startScan()
+                            bleManager.setCustomMessage("距離測定テスト: ${uwbDistanceText}")
+                            experimentLogs.add(0, "システム: 計測(スキャン)を開始しました...")
+                        },
+                        enabled = !isScanning
+                    ) {
+                        Text(if (isScanning) "計測中..." else "計測開始 (Scan)")
+                    }
+
+                    if (isScanning) {
+                        Button(
+                            onClick = {
+                                bleManager.stopScan()
+                                experimentLogs.add(0, "システム: 中断しました")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("中断")
+                        }
+                    }
+                }
             }
-        } else {
-            pendingAction = action
-            //permissionRequest.launch(REQUIRED_PERMISSION.toTypedArray())
-            permissionLauncher.launch(REQUIRED_PERMISSION.toTypedArray())
-        }
-    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "Wi-Fi Aware 通信ログ",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
+            Divider(modifier = Modifier.padding(vertical = 16.dp))
+            Text("通信ログ", fontSize = 18.sp, modifier = Modifier.align(Alignment.Start))
 
-        // 操作ボタンエリア
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            Button(onClick = { checkPermissionsAndRun("Publish") }) {
-                Text("発信 (Pub)")
-            }
-            Button(onClick = { checkPermissionsAndRun("Subscribe") }) {
-                Text("探索 (Sub)")
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        Divider()
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // ★メッセージ表示エリア (スクロール可能)
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(messages) { msg ->
-                MessageCard(msg)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(top = 8.dp)
+            ) {
+                items(experimentLogs) { log ->
+                    MessageCard(text = log)
+                }
             }
         }
     }

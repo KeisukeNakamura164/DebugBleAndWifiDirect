@@ -129,7 +129,8 @@ class BleManager(private val context: Context) {
     private val recentConnectionHistory = ConcurrentHashMap<String, Long>()
 
     // ★追加: 再接続を禁止する時間 (ミリ秒) 。60分 = 3600,000ms
-    private val RECONNECT_COOLDOWN_MS = 60 * 60 * 1000L
+    //todo この箇所は試験のため　０に変更しました
+    private val RECONNECT_COOLDOWN_MS = 60 * 60 * 1000L * 0
 
     // コルーチンスコープ (Managerの生存期間に合わせるためSupervisorJobを使用)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -216,6 +217,10 @@ class BleManager(private val context: Context) {
             super.onConnectionStateChange(device, status, newState)
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.d("GATT_SERVER", "クライアントが接続しました: ${device?.address}")
+                // 相手から接続されたので、もう自分から探しに行く必要はない
+                stopScan()
+                // 1対1通信なら、他の人に見つからないようにアドバタイズも止める（任意）
+                stopAdvertising()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 Log.d("GATT_SERVER", "クライアントが切断しました: ${device?.address}")
                 currentMtu = 23 //サーバー側も接続切れたらMTUをデフォルトに戻す
@@ -619,11 +624,13 @@ class BleManager(private val context: Context) {
                         disconnectClient()
 
                         // 切断したら、またスキャンを再開して次の人を探す
+                        //todo 試験のため次の探索を自動でおこなわないように変更
+                        /*
                         scope.launch {
                             delay(1000) //
                             startScan()
                         }
-
+                        */
                     }
                 } else {
                     // --- 通常のデータチャンク (1番以降) を受信した場合 ---
