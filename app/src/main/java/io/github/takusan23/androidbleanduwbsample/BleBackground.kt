@@ -393,7 +393,8 @@ class BleManager(private val context: Context) {
                     // 接続に成功したらリトライ回数をリセット
                     connectionRetryCount = 0
                     // 接続に成功したら、サービスを検索
-                    gatt?.requestMtu(512)
+                    //gatt?.requestMtu(512)
+                    gatt?.discoverServices()
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.d("GATT_CLIENT", "GATTサーバーから切断しました。")
 
@@ -450,6 +451,7 @@ class BleManager(private val context: Context) {
                 Log.e("GATT_CLIENT", "onMtuChanged: 権限がありません。")
                 return
             }
+            /*
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.d("GATT_CLIENT", "MTUサイズが $mtu バイトに変更されました。")
                 //  変更されたMTUサイズを保存
@@ -462,6 +464,7 @@ class BleManager(private val context: Context) {
                 )
                 gatt?.discoverServices()
             }
+             */
         }
 
         // サービスが発見された
