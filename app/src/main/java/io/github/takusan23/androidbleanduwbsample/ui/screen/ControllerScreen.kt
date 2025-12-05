@@ -134,15 +134,17 @@ fun ControllerScreen() {
         }
     }
 
-    // メッセージ受信検知（ログ追加）
+        // メッセージ受信検知（ログ追加）
     LaunchedEffect(receivedMessage) {
         if (receivedMessage.isNotEmpty()) {
             val distStr = currentDistanceMeters?.let { "%.2fm".format(it) } ?: "不明"
             val log = "受信: $receivedMessage\n(距離: $distStr)"
+
+            // ログリストの先頭に追加
             experimentLogs.add(0, log)
-            // 一度受信したらクリアしておかないと再Composeで重複する可能性があるためクリア推奨だが
-            // BleManagerの仕様上、明示的にクリアメソッドを呼ぶか、そのままにする。
-            // ここではログに追加したのでUI上はOK
+
+            // ★重要: 次のメッセージを受け取れるように、Manager側の変数を空にする
+            //bleManager.clearMessage()
         }
     }
 

@@ -876,8 +876,8 @@ class BleManager(private val context: Context) {
         advertiser?.stopAdvertising(advertiseCallback)
         Log.d("BLE", "Advertise stopped.")
 
-        gattServer?.close()
-        gattServer = null
+        //gattServer?.close()
+        //gattServer = null
         _isAdvertising.value = false
     }
 

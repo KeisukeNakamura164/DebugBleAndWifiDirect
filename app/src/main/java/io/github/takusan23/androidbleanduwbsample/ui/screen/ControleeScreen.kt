@@ -115,8 +115,12 @@ fun ControleeScreen() {
     LaunchedEffect(receivedMessage) {
         if (receivedMessage.isNotEmpty()) {
             val distStr = currentDistanceMeters?.let { "%.2fm".format(it) } ?: "不明"
-            val log = "完了: $receivedMessage\n(距離: $distStr)"
+            val log = "返信あり: $receivedMessage\n(距離: $distStr)"
+
             experimentLogs.add(0, log)
+
+            // ★重要: 受信済みとしてクリアする
+            //bleManager.clearMessage()
         }
     }
 
