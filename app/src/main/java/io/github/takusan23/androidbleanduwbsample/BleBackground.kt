@@ -125,13 +125,6 @@ class BleManager(private val context: Context) {
     // 受信データバッファ (サーバー側) - スレッドセーフなMapを使用
     private val receivedDataBuffer = ConcurrentHashMap<Int, ByteArray>()
 
-    // ★追加: 最近通信したデバイスのアドレスと時間を記録するマップ
-    private val recentConnectionHistory = ConcurrentHashMap<String, Long>()
-
-    // ★追加: 再接続を禁止する時間 (ミリ秒) 。60分 = 3600,000ms
-    //todo この箇所は試験のため　０に変更しました
-    private val RECONNECT_COOLDOWN_MS = 60 * 60 * 1000L * 0
-
     // コルーチンスコープ (Managerの生存期間に合わせるためSupervisorJobを使用)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -190,20 +183,10 @@ class BleManager(private val context: Context) {
 
             // 既に誰かと接続中(clientGatt != null)でなければ、見つけた端末に即接続しにいく
             if (clientGatt == null) {
-                // 最後に通信した時間を取得 (履歴になければ 0)
-                val lastConnectedTime = recentConnectionHistory[deviceAddress] ?: 0L
+                Log.d(TAG, "ターゲットを発見: $deviceAddress -> 接続を開始します")
 
-                // クールダウン期間が経過しているかチェック
-                if (currentTime - lastConnectedTime > RECONNECT_COOLDOWN_MS) {
-
-                    Log.d(TAG, "ターゲットを発見: $deviceAddress -> 接続を開始します")
-
-                    // 接続するタイミングで、履歴に「現在時刻」を記録する
-                    recentConnectionHistory[deviceAddress] = currentTime
-
-                    stopScan()
-                    connectToDevice(result.device)
-                }
+                stopScan()
+                connectToDevice(result.device)
             }
         }
 
