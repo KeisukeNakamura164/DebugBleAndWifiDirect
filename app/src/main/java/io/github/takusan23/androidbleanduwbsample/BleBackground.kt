@@ -752,7 +752,11 @@ class BleManager(private val context: Context) {
         serverDataToSend.clear()
 
         val dataBytes = message.toByteArray(Charsets.UTF_8)
-        val chunkSize = (currentMtu - 3 - 1)
+        // MTUが大きくても、Characteristicの最大値(512byte)を超えてはいけない。
+        // ここでは (512 - 1(seq) - 3(header)) = 508バイトを上限となる。
+        val maxPayloadSize = 500
+        val calculatedSize = (currentMtu - 3 - 1)
+        val chunkSize = min(calculatedSize, maxPayloadSize)
         var offset = 0
         var sequenceNumber = 1
 
