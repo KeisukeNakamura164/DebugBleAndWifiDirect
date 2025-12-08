@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+
 import androidx.core.uwb.*
 import io.github.takusan23.androidbleanduwbsample.MainActivity
 import io.github.takusan23.androidbleanduwbsample.MessageCard
@@ -83,24 +84,22 @@ fun ControllerScreen() {
                 sessionKeyInfo = sessionKeyInfo
             )
             val encodeHostParameter = UwbControllerParams.encode(uwbControllerParams)
-            val controleeAddressFlow = MutableStateFlow<ByteArray?>(null)
+            // 1. パラメータをBleManagerにセット
+            bleManager.setUwbConfig(encodeHostParameter)
 
-            // Setup用BLE (BlePeripheral) 開始
-            val peripheralJob = launch {
-                BlePeripheral.startPeripheralAndAdvertising(
-                    context = context,
-                    onCharacteristicReadRequest = { encodeHostParameter },
-                    onCharacteristicWriteRequest = {
-                        println("Received Address via Setup BLE")
-                        controleeAddressFlow.value = it
-                    }
-                )
-            }
+            // 2. アドバタイズ開始 (これで Controlee が接続できるようになる)
+            bleManager.startAdvertising()
+            experimentLogs.add(0, "システム: UWBセットアップ待機中...")
 
-            // 相手のアドレス待ち
-            val controleeAddress = controleeAddressFlow.filterNotNull().first()
-            peripheralJob.cancel() // Setup完了したらSetup用BLEは止める
+            // 3. 相手(Controlee)からのアドレス書き込みを待つ
+            val controleeAddress = bleManager.receivedUwbAddress
+                .filterNotNull()
+                .first() // アドレスが来るまでここで中断(待機)される
 
+            experimentLogs.add(0, "システム: 相手のアドレスを受信しました。測定を開始します。")
+
+            // ※ここで stopAdvertising する必要はありません。
+            // データ通信(チャット)でも同じ BleManager(GATT Server) を使い続けるためです。
             // UWB Ranging開始
             val rangingParameters = RangingParameters(
                 uwbConfigType = RangingParameters.CONFIG_MULTICAST_DS_TWR,

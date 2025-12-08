@@ -25,6 +25,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
+import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,6 +78,18 @@ class BleManager(private val context: Context) {
     private val MESSAGE_CHAR_UUID: UUID = UUID.fromString("19b10001-e8f2-537e-4f6c-d104768a1214")
 
     private val REPLY_CHAR_UUID: UUID = UUID.fromString("19b10001-e8f2-537e-4f6c-d104768a1215")
+
+    // 2. 変数の追加
+// UWB設定データ（送信するデータ）
+    private var uwbConfigData: ByteArray? = null
+    // 受信した相手のアドレス（ControllerScreenで監視する）
+    val receivedUwbAddress = MutableStateFlow<ByteArray?>(null)
+
+    // 3. 外部からデータをセットする関数を追加
+    fun setUwbConfig(data: ByteArray) {
+        this.uwbConfigData = data
+    }
+    val UWB_CONFIG_CHAR_UUID: UUID = UUID.fromString("42a3302d-83ca-44b4-9b5a-e5f369bb673b") // 末尾b
 
     // BluetoothAdapterの準備
     private val bluetoothAdapter: BluetoothAdapter? by lazy {
@@ -213,6 +226,28 @@ class BleManager(private val context: Context) {
     }
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
+
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+        override fun onCharacteristicReadRequest(
+            device: BluetoothDevice?,
+            requestId: Int,
+            offset: Int,
+            characteristic: BluetoothGattCharacteristic?
+        ) {
+            super.onCharacteristicReadRequest(device, requestId, offset, characteristic)
+
+            if (characteristic?.uuid == UWB_CONFIG_CHAR_UUID) {
+                val data = uwbConfigData ?: ByteArray(0)
+                // オフセット対応（データが長い場合分割して読まれることがあるため）
+                val slice = if (offset < data.size) data.copyOfRange(offset, data.size) else ByteArray(0)
+
+                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, slice)
+            } else {
+                // 他のRead要求（既存の処理があれば統合、なければ以下）
+                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+            }
+        }
+
         override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
             super.onConnectionStateChange(device, status, newState)
             if (newState == BluetoothProfile.STATE_CONNECTED) {
@@ -239,6 +274,7 @@ class BleManager(private val context: Context) {
         }
 
         // クライアントから書き込み要求があったとき
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onCharacteristicWriteRequest(
             device: BluetoothDevice?,
             requestId: Int,
@@ -257,6 +293,16 @@ class BleManager(private val context: Context) {
                 offset,
                 value
             )
+            if (characteristic?.uuid == UWB_CONFIG_CHAR_UUID && value != null) {
+                Log.d(TAG, "UWBアドレスを受信しました")
+                receivedUwbAddress.value = value // Flowに流す
+
+                if (responseNeeded) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                }
+                return
+            }
+
             if (characteristic?.uuid == MESSAGE_CHAR_UUID && value != null && value.isNotEmpty()) {
 
                 val sequenceNumber = value[0].toInt() // 先頭バイトをシーケンス番号として取得
@@ -759,7 +805,11 @@ class BleManager(private val context: Context) {
         serverDataToSend.clear()
 
         val dataBytes = message.toByteArray(Charsets.UTF_8)
-        val chunkSize = (currentMtu - 3 - 1)
+        // MTUが大きくても、Characteristicの最大値(512byte)を超えてはいけない。
+        // ここでは (512 - 1(seq) - 3(header)) = 508バイトを上限となる。
+        val maxPayloadSize = 500
+        val calculatedSize = (currentMtu - 3 - 1)
+        val chunkSize = min(calculatedSize, maxPayloadSize)
         var offset = 0
         var sequenceNumber = 1
 
@@ -1051,6 +1101,13 @@ class BleManager(private val context: Context) {
         )
         replyCharacteristic.addDescriptor(cccDescriptor)
         service.addCharacteristic(replyCharacteristic)
+
+        val uwbConfigCharacteristic = BluetoothGattCharacteristic(
+            UWB_CONFIG_CHAR_UUID,
+            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE
+        )
+        service.addCharacteristic(uwbConfigCharacteristic)
 
         gattServer?.addService(service)
     }
