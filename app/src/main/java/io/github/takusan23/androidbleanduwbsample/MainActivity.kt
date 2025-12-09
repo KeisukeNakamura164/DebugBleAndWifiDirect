@@ -47,70 +47,71 @@ import io.github.takusan23.androidbleanduwbsample.ui.screen.ControllerScreen
 import io.github.takusan23.androidbleanduwbsample.ui.screen.HomeScreen
 import io.github.takusan23.androidbleanduwbsample.ui.theme.AndroidBleAndUwbSampleTheme
 import kotlinx.coroutines.*
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.File
 import java.io.OutputStreamWriter
 import java.io.PrintWriter
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 // --- 定数・データクラス ---
 private const val PORT = 8888
 private const val SERVICE_TYPE = "_tus-pj-app._tcp"
 private const val INSTANCE_NAME = "pj_keijiban"
+private const val TAG = "P2P_DEBUG"
 data class P2pServerResult(val receivedData: String?, val clientIp: String?)
 
 // --- 通信ロジック (トップレベル関数) ---
-// ※ startP2pServer, startP2pClient は変更なしのため省略せずそのまま使ってください
-// (前回のコードと同じものを維持)
 suspend fun startP2pServer(context: Context): P2pServerResult = withContext(Dispatchers.IO) {
     var serverSocket: ServerSocket? = null
     var receivedDataString: String? = null
     var clientIp: String? = null
     try {
-        serverSocket = ServerSocket(PORT)
+        serverSocket = ServerSocket()
+        serverSocket.reuseAddress = true
+        serverSocket.bind(InetSocketAddress(PORT))
+        serverSocket.soTimeout = 15000 // タイムアウト15秒
+
+        Log.d(TAG, "[Server] ポート $PORT で接続待機中...")
         val client = serverSocket.accept()
         clientIp = client.inetAddress.hostAddress
-        try {
-            receivedDataString = client.getInputStream().bufferedReader(Charsets.UTF_8).readText()
-        } finally { client.close() }
+        Log.d(TAG, "[Server] クライアント接続あり: $clientIp")
 
-        if (!receivedDataString.isNullOrBlank()) {
-            try {
-                val receivedJson = JSONObject(receivedDataString)
-                val today = LocalDate.now()
-                val storageDir = File(context.filesDir, "OtherAccount/${today.year}")
-                if (!storageDir.exists()) storageDir.mkdirs()
-                val outputFile = File(storageDir, "oa_${today.format(DateTimeFormatter.ofPattern("yyyyMM"))}.json")
-                val monthDataArray = if (outputFile.exists() && outputFile.readText().isNotBlank()) JSONArray(outputFile.readText()) else JSONArray()
-                monthDataArray.put(receivedJson)
-                outputFile.writeText(monthDataArray.toString(4))
-            } catch (e: Exception) { Log.e("P2P_SERVER", "Error saving file", e) }
+        try {
+            // データ受信 (5秒タイムアウト)
+            withTimeout(5000) {
+                receivedDataString = client.getInputStream().bufferedReader(Charsets.UTF_8).readText()
+            }
+            Log.d(TAG, "[Server] 受信データ: $receivedDataString")
+        } finally {
+            client.close()
         }
     } catch (e: Exception) {
-        if (e !is CancellationException) Log.e("P2P_SERVER", "Error: ${e.message}")
+        if (e !is CancellationException) Log.e(TAG, "[Server] エラー: ${e.message}")
     } finally {
         try { serverSocket?.close() } catch (_: Exception) {}
     }
     return@withContext P2pServerResult(receivedDataString, clientIp)
 }
 
-suspend fun startP2pClient(hostAddress: String, jsonString: String): Boolean = withContext(Dispatchers.IO) {
+suspend fun startP2pClient(hostAddress: String, message: String): Boolean = withContext(Dispatchers.IO) {
     var socket: Socket? = null
     var success = false
     try {
+        Log.d(TAG, "[Client] $hostAddress へ接続試行中...")
         socket = Socket()
-        socket.connect(InetSocketAddress(InetAddress.getByName(hostAddress), PORT), 5000)
+        // 接続タイムアウト3秒
+        socket.connect(InetSocketAddress(InetAddress.getByName(hostAddress), PORT), 3000)
+
         val writer = PrintWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8), true)
-        writer.println(jsonString)
+        writer.print(message)
+        writer.flush()
         success = true
+        Log.d(TAG, "[Client] 送信成功: $message")
     } catch (e: Exception) {
-        if (e !is CancellationException) Log.e("P2P_CLIENT", "Error: ${e.message}")
+        if (e !is CancellationException) Log.e(TAG, "[Client] エラー: ${e.message}")
     } finally {
         try { socket?.close() } catch (_: Exception) {}
     }
@@ -119,12 +120,18 @@ suspend fun startP2pClient(hostAddress: String, jsonString: String): Boolean = w
 
 // --- Activity 本体 ---
 class MainActivity : ComponentActivity() {
-    companion object { lateinit var awareManager: AwareManager }
+
+    // Wi-Fi P2P
     private lateinit var manager: WifiP2pManager
     private lateinit var channel: WifiP2pManager.Channel
     private lateinit var receiver: BroadcastReceiver
     private val intentFilter = IntentFilter()
 
+    // UWB
+    private lateinit var uwbManager: UwbManager
+    private var uwbClientSessionScope: UwbClientSessionScope? = null
+
+    // UI
     private var isWifiP2pEnabled by mutableStateOf(false)
     private var peers by mutableStateOf<List<WifiP2pDevice>>(emptyList())
     private var servicePeers by mutableStateOf<List<WifiP2pDevice>>(emptyList())
@@ -132,16 +139,19 @@ class MainActivity : ComponentActivity() {
     private var connectionInfo by mutableStateOf<WifiP2pInfo?>(null)
     private var chatMessages by mutableStateOf<List<String>>(emptyList())
     private var uwbDistance by mutableStateOf("待機中...")
-    private var isP2pMode by mutableStateOf(false)
-    private var isServerRunning = false
 
-    // ★重要: UWBセッションを保持する変数
-    private var uwbClientSessionScope: UwbClientSessionScope? = null
+    // 画面切り替え
+    private var isP2pMode by mutableStateOf(false)
+    private var isExchangingData = false // 通信中フラグ
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        awareManager = AwareManager(this)
         super.onCreate(savedInstanceState)
+        Log.d(TAG, "onCreate: アプリ起動")
 
+        // UWB初期化
+        if (Build.VERSION.SDK_INT >= 31) uwbManager = UwbManager.createInstance(this)
+
+        // Wi-Fi P2P初期化
         manager = getSystemService(WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager.initialize(this, mainLooper, null)
 
@@ -149,7 +159,7 @@ class MainActivity : ComponentActivity() {
         intentFilter.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
         intentFilter.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
         intentFilter.addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
-        createDummyMyAccountFile()
+
         checkAndRequestPermissions()
         setupServiceDiscoveryListeners()
         startLocalService()
@@ -157,17 +167,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             AndroidBleAndUwbSampleTheme {
                 if (isP2pMode) {
-                    WifiDirectApp(isWifiP2pEnabled, thisDevice, peers, servicePeers, { discoverPeers() }, { discoverServices() }, { connect(it) }, connectionInfo, chatMessages, { disconnect() }, uwbDistance)
+                    WifiDirectApp(isWifiP2pEnabled, thisDevice, peers, servicePeers,
+                        { discoverPeers() },
+                        { discoverServices() },
+                        { connect(it) },
+                        connectionInfo, chatMessages, { disconnect() }, uwbDistance
+                    )
                 } else {
                     MainScreen(
-                        // ★修正: アドレス取得リクエスト
-                        onGetLocalAddress = { isController ->
-                            prepareUwbSessionAndGetAddress(isController)
-                        },
-                        // ★修正: UWB開始リクエスト
-                        onStartUwb = { params, address, isController ->
-                            startUwbRanging(params, address, isController)
-                        },
+                        onGetLocalAddress = { isController -> prepareUwbSessionAndGetAddress(isController) },
+                        onStartUwb = { params, address, isController -> startUwbRanging(params, address, isController) },
                         currentDistance = uwbDistance,
                         onSwitchToP2p = { isP2pMode = true }
                     )
@@ -176,23 +185,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ★重要: セッションを作成・保持してアドレスを返す関数
+    // UWB関連
     private suspend fun prepareUwbSessionAndGetAddress(isController: Boolean): ByteArray {
         if (uwbClientSessionScope == null) {
             val uwbManager = UwbManager.createInstance(this)
-            uwbClientSessionScope = if (isController) {
-                uwbManager.controllerSessionScope()
-            } else {
-                uwbManager.controleeSessionScope()
-            }
+            uwbClientSessionScope = if (isController) uwbManager.controllerSessionScope() else uwbManager.controleeSessionScope()
         }
-        // ここで返したアドレス(A)と、後のstartUwbRangingで使うセッションのアドレス(A)が一致する！
         return uwbClientSessionScope!!.localAddress.address
     }
 
-    // ★重要: 保持しているセッションを使って測距開始
     private fun startUwbRanging(params: UwbControllerParams, peerAddress: ByteArray?, isController: Boolean) {
-        val session = uwbClientSessionScope ?: return // 作成済みセッションを使う
+        val session = uwbClientSessionScope ?: return
 
         lifecycleScope.launch {
             try {
@@ -203,9 +206,7 @@ class MainActivity : ComponentActivity() {
                     UwbDevice.createForAddress(params.address)
                 }
 
-                // ★UNICASTに変更 (安定性向上)
                 val configType = RangingParameters.CONFIG_UNICAST_DS_TWR
-
                 val complexChannel = UwbComplexChannel(params.channel, params.preambleIndex)
                 val rangingParameters = RangingParameters(
                     uwbConfigType = configType,
@@ -229,61 +230,121 @@ class MainActivity : ComponentActivity() {
                                 is RangingResult.RangingResultPeerDisconnected -> uwbDistance = "再接続中..."
                             }
                         }
-                    } catch (e: Exception) {
-                        Log.e("UWB", "Error: ${e.message}")
-                    }
+                    } catch (e: Exception) { Log.e("UWB", "Error: ${e.message}") }
                     delay(1000)
                 }
-            } catch (e: Exception) {
-                uwbDistance = "エラー"
+            } catch (e: Exception) { uwbDistance = "エラー" }
+        }
+    }
+
+    // P2P関連リスナー
+    private val peerListListener = WifiP2pManager.PeerListListener { peerList ->
+        peers = peerList.deviceList.toList()
+        Log.d(TAG, "通常Peer一覧更新: ${peers.size}件")
+    }
+
+    // ★重要: 時差・リトライロジックを組み込んだ接続リスナー
+    private val connectionInfoListener = WifiP2pManager.ConnectionInfoListener { info ->
+        connectionInfo = info
+        Log.d(TAG, "接続状態変更: Owner=${info.isGroupOwner}")
+
+        if (info.groupFormed && info.isGroupOwner) {
+            // 親機 (Server)
+            if (isExchangingData) return@ConnectionInfoListener
+            isExchangingData = true
+
+            lifecycleScope.launch {
+                try {
+                    Log.d(TAG, "親機: 受信待機開始")
+                    val res = startP2pServer(this@MainActivity)
+                    if (res.receivedData != null) chatMessages = chatMessages + "Recv: ${res.receivedData}"
+
+                    if (res.clientIp != null) {
+                        // ★時差ロジック: Clientが受信モードになるのを待つ
+                        Log.d(TAG, "親機: 返信のため0.5秒待機...")
+                        delay(500)
+
+                        val message = createSampleMessage("Server Reply")
+                        val success = startP2pClient(res.clientIp, message)
+                        if (success) {
+                            chatMessages = chatMessages + "Sent back: $message"
+                        }
+                    }
+                } finally {
+                    isExchangingData = false
+                    Log.d(TAG, "親機: 処理完了・切断")
+                    disconnect()
+                }
+            }
+        } else if (info.groupFormed) {
+            // 子機 (Client)
+            val goIp = info.groupOwnerAddress?.hostAddress
+            if (goIp != null) {
+                if (isExchangingData) return@ConnectionInfoListener
+                isExchangingData = true
+
+                lifecycleScope.launch {
+                    try {
+                        // ★時差ロジック: Serverのソケット準備を待つ
+                        Log.d(TAG, "子機: サーバー準備待ち(1秒)...")
+                        delay(1000)
+
+                        val message = createSampleMessage("Client Hello")
+                        var success = false
+
+                        // ★リトライロジック: 最大3回送信を試みる
+                        for (i in 1..3) {
+                            Log.d(TAG, "子機: 送信試行 $i 回目")
+                            success = startP2pClient(goIp, message)
+                            if (success) {
+                                chatMessages = chatMessages + "Sent: $message"
+                                break
+                            }
+                            delay(1000) // 失敗したら1秒待って再試行
+                        }
+
+                        if (success) {
+                            Log.d(TAG, "子機: 返信待機開始")
+                            val res = startP2pServer(this@MainActivity)
+                            if (res.receivedData != null) chatMessages = chatMessages + "Reply: ${res.receivedData}"
+                        }
+                    } finally {
+                        isExchangingData = false
+                        Log.d(TAG, "子機: 処理完了・切断")
+                        disconnect()
+                    }
+                }
             }
         }
     }
 
-    // (以下、P2P関連リスナー等は変更なし)
-    private val peerListListener = WifiP2pManager.PeerListListener { peerList -> peers = peerList.deviceList.toList() }
-    private val connectionInfoListener = WifiP2pManager.ConnectionInfoListener { info ->
-        connectionInfo = info
-        if (info.groupFormed && info.isGroupOwner) {
-            if (isServerRunning) return@ConnectionInfoListener
-            isServerRunning = true
-            lifecycleScope.launch {
-                try {
-                    val res = startP2pServer(this@MainActivity)
-                    if (res.receivedData != null) chatMessages = chatMessages + "Recv: ${res.receivedData}"
-                    if (res.clientIp != null) {
-                        val myJson = loadAndPrepareMyAccountJson(this@MainActivity)
-                        if (myJson != null && startP2pClient(res.clientIp, myJson)) chatMessages = chatMessages + "Sent back."
-                    }
-                } finally { isServerRunning = false; disconnect() }
-            }
-        } else if (info.groupFormed) {
-            val goIp = info.groupOwnerAddress?.hostAddress
-            if (goIp != null) {
-                lifecycleScope.launch {
-                    val myJson = loadAndPrepareMyAccountJson(this@MainActivity)
-                    if (myJson != null && startP2pClient(goIp, myJson)) chatMessages = chatMessages + "Sent."
-                    val res = startP2pServer(this@MainActivity)
-                    if (res.receivedData != null) chatMessages = chatMessages + "Reply: ${res.receivedData}"
-                    disconnect()
-                }
-            }
-        }
-    }
     inner class WiFiDirectBroadcastReceiver : BroadcastReceiver() {
         @SuppressLint("MissingPermission") override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> isWifiP2pEnabled = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1) == WifiP2pManager.WIFI_P2P_STATE_ENABLED
+                WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
+                    isWifiP2pEnabled = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1) == WifiP2pManager.WIFI_P2P_STATE_ENABLED
+                    Log.d(TAG, "P2P State Changed: $isWifiP2pEnabled")
+                }
                 WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> manager.requestPeers(channel, peerListListener)
                 WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
                     val networkInfo = intent.getParcelableExtra<NetworkInfo>(WifiP2pManager.EXTRA_NETWORK_INFO)
-                    if (networkInfo?.isConnected == true) manager.requestConnectionInfo(channel, connectionInfoListener) else connectionInfo = null
+                    if (networkInfo?.isConnected == true) {
+                        Log.d(TAG, "接続確立。詳細情報取得中...")
+                        manager.requestConnectionInfo(channel, connectionInfoListener)
+                    } else {
+                        Log.d(TAG, "切断されました")
+                        connectionInfo = null
+                    }
                 }
                 WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION -> thisDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) intent.getParcelableExtra(WifiP2pManager.EXTRA_WIFI_P2P_DEVICE, WifiP2pDevice::class.java) else intent.getParcelableExtra(WifiP2pManager.EXTRA_WIFI_P2P_DEVICE)
             }
         }
     }
-    private val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+
+    private val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        Log.d(TAG, "権限リクエスト結果: $it")
+    }
+
     private fun checkAndRequestPermissions() {
         val perms = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= 31) {
@@ -292,40 +353,86 @@ class MainActivity : ComponentActivity() {
         }
         if (perms.isNotEmpty()) requestPermissionLauncher.launch(perms.toTypedArray())
     }
-    @SuppressLint("MissingPermission") private fun discoverPeers() { manager.discoverPeers(channel, object : WifiP2pManager.ActionListener { override fun onSuccess() {}; override fun onFailure(r: Int) {} }) }
-    @SuppressLint("MissingPermission") private fun discoverServices() { servicePeers = emptyList(); manager.discoverServices(channel, object : WifiP2pManager.ActionListener { override fun onSuccess() {}; override fun onFailure(r: Int) {} }) }
-    @SuppressLint("MissingPermission") private fun connect(device: WifiP2pDevice) {
+
+    @SuppressLint("MissingPermission")
+    private fun discoverPeers() {
+        Log.d(TAG, "Scan Peers 開始")
+        manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { Log.d(TAG, "discoverPeers 成功") }
+            override fun onFailure(r: Int) { Log.e(TAG, "discoverPeers 失敗: $r") }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun discoverServices() {
+        Log.d(TAG, "Scan Services 開始")
+        servicePeers = emptyList()
+        manager.clearServiceRequests(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                val req = WifiP2pDnsSdServiceRequest.newInstance(SERVICE_TYPE)
+                manager.addServiceRequest(channel, req, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        manager.discoverServices(channel, object : WifiP2pManager.ActionListener {
+                            override fun onSuccess() { Log.d(TAG, "discoverServices 成功") }
+                            override fun onFailure(r: Int) { Log.e(TAG, "discoverServices 失敗: $r") }
+                        })
+                    }
+                    override fun onFailure(r: Int) { Log.e(TAG, "addServiceRequest 失敗: $r") }
+                })
+            }
+            override fun onFailure(r: Int) { Log.e(TAG, "clearServiceRequests 失敗: $r") }
+        })
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun connect(device: WifiP2pDevice) {
+        Log.d(TAG, "接続要求: ${device.deviceName}")
         val config = WifiP2pConfig().apply { deviceAddress = device.deviceAddress; groupOwnerIntent = 0 }
-        manager.connect(channel, config, object : WifiP2pManager.ActionListener { override fun onSuccess() {}; override fun onFailure(r: Int) {} })
+        manager.connect(channel, config, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { Log.d(TAG, "connect 成功") }
+            override fun onFailure(r: Int) { Log.e(TAG, "connect 失敗: $r") }
+        })
     }
-    private fun disconnect() { manager.removeGroup(channel, object : WifiP2pManager.ActionListener { override fun onSuccess() { connectionInfo = null }; override fun onFailure(r: Int) {} }) }
-    private fun loadAndPrepareMyAccountJson(context: Context): String? {
-        val file = File(context.filesDir, "MyAccount/myaccount.json")
-        if (!file.exists()) return null
-        return try { JSONObject(file.readText()).apply { put("time", LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"))) }.toString() } catch (e: Exception) { null }
+    private fun disconnect() {
+        Log.d(TAG, "切断要求")
+        manager.removeGroup(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { connectionInfo = null }
+            override fun onFailure(r: Int) {}
+        })
     }
-    private fun createDummyMyAccountFile() {
-        val dir = File(filesDir, "MyAccount").apply { if (!exists()) mkdirs() }
-        val file = File(dir, "myaccount.json")
-        if (!file.exists()) file.writeText("""{"name": "Taro Test", "id": "test_user_01"}""")
+
+    private fun createSampleMessage(prefix: String): String {
+        val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
+        val model = Build.MODEL
+        return "[$prefix] Device:$model Time:$timestamp"
     }
-    @SuppressLint("MissingPermission") private fun startLocalService() {
+
+    @SuppressLint("MissingPermission")
+    private fun startLocalService() {
         val record = mapOf("boardName" to "MyBoard", "ownerName" to "User")
         manager.addLocalService(channel, WifiP2pDnsSdServiceInfo.newInstance(INSTANCE_NAME, SERVICE_TYPE, record), null)
     }
+
     private fun setupServiceDiscoveryListeners() {
-        manager.setDnsSdResponseListeners(channel, { _, type, device -> if (type.startsWith(SERVICE_TYPE) && !servicePeers.contains(device)) servicePeers = servicePeers + device }, null)
-        manager.addServiceRequest(channel, WifiP2pDnsSdServiceRequest.newInstance(SERVICE_TYPE), null)
+        manager.setDnsSdResponseListeners(channel, { _, type, device ->
+            if (type.startsWith(SERVICE_TYPE)) {
+                if (servicePeers.none { it.deviceAddress == device.deviceAddress }) {
+                    Log.d(TAG, "Service発見: ${device.deviceName}")
+                    servicePeers = servicePeers + device
+                }
+            }
+        }, null)
     }
+
     override fun onResume() { super.onResume(); receiver = WiFiDirectBroadcastReceiver(); registerReceiver(receiver, intentFilter) }
     override fun onPause() { super.onPause(); unregisterReceiver(receiver) }
-    override fun onDestroy() { super.onDestroy(); disconnect(); awareManager.close() }
+    override fun onDestroy() { super.onDestroy(); disconnect() }
 }
 
-// --- Navigation ---
+// UI Components
 @Composable
 private fun MainScreen(
-    onGetLocalAddress: suspend (Boolean) -> ByteArray, // ★追加
+    onGetLocalAddress: suspend (Boolean) -> ByteArray,
     onStartUwb: (UwbControllerParams, ByteArray?, Boolean) -> Unit,
     currentDistance: String,
     onSwitchToP2p: () -> Unit
@@ -336,15 +443,14 @@ private fun MainScreen(
             HomeScreen(onControllerClick = { navController.navigate("controller") }, onControleeClick = { navController.navigate("controlee") })
         }
         composable("controller") {
-            ControllerScreen(onGetLocalAddress, onStartUwb, currentDistance, onSwitchToP2p) // ★渡す
+            ControllerScreen(onGetLocalAddress, onStartUwb, currentDistance, onSwitchToP2p)
         }
         composable("controlee") {
-            ControleeScreen(onGetLocalAddress, onStartUwb, currentDistance, onSwitchToP2p) // ★渡す
+            ControleeScreen(onGetLocalAddress, onStartUwb, currentDistance, onSwitchToP2p)
         }
     }
 }
 
-// --- UI Components (WifiDirectApp) は以前と同じなので省略（そのままでOK）---
 @Composable
 fun WifiDirectApp(
     isWifiP2pEnabled: Boolean, thisDevice: WifiP2pDevice?, peers: List<WifiP2pDevice>, servicePeers: List<WifiP2pDevice>,
@@ -353,6 +459,7 @@ fun WifiDirectApp(
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Wi-Fi P2P: ${if (isWifiP2pEnabled) "ON" else "OFF"}")
+
         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFE0F7FA)), modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).border(1.dp, Color(0xFF006064), RoundedCornerShape(8.dp))) {
             Column(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("UWB Distance", fontSize = 14.sp, color = Color.Gray)
@@ -373,11 +480,38 @@ fun WifiDirectApp(
                 items(chatMessages.reversed()) { msg -> Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth().padding(2.dp)) { Text(msg, modifier = Modifier.padding(8.dp), fontSize = 12.sp, fontFamily = FontFamily.Monospace) } }
             }
         }
-        Text("Found Peers:", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
-        LazyColumn(modifier = Modifier.height(150.dp).fillMaxWidth().border(1.dp, Color.Gray)) {
-            items(peers) { device -> Row(modifier = Modifier.fillMaxWidth().clickable { onConnectPeer(device) }.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(device.deviceName ?: "Unknown"); Button(onClick = { onConnectPeer(device) }) { Text("Connect") }
-            } }
+
+        Text("Device List:", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+        LazyColumn(modifier = Modifier.height(200.dp).fillMaxWidth().border(1.dp, Color.Gray)) {
+            // セクション1: 通常のPeers
+            item {
+                Text("--- Normal Peers ---", modifier = Modifier.padding(4.dp).background(Color.LightGray).fillMaxWidth(), fontSize = 12.sp)
+            }
+            if (peers.isEmpty()) {
+                item { Text("No peers found", modifier = Modifier.padding(8.dp), color = Color.Gray) }
+            } else {
+                items(peers) { device ->
+                    Row(modifier = Modifier.fillMaxWidth().clickable { onConnectPeer(device) }.padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(device.deviceName ?: "Unknown", modifier = Modifier.weight(1f))
+                        Button(onClick = { onConnectPeer(device) }, modifier = Modifier.height(36.dp)) { Text("Connect", fontSize = 10.sp) }
+                    }
+                }
+            }
+
+            // セクション2: Service Peers
+            item {
+                Text("--- Service Peers ---", modifier = Modifier.padding(4.dp).background(Color.LightGray).fillMaxWidth(), fontSize = 12.sp)
+            }
+            if (servicePeers.isEmpty()) {
+                item { Text("No services found", modifier = Modifier.padding(8.dp), color = Color.Gray) }
+            } else {
+                items(servicePeers) { device ->
+                    Row(modifier = Modifier.fillMaxWidth().clickable { onConnectPeer(device) }.padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(device.deviceName ?: "Unknown", modifier = Modifier.weight(1f))
+                        Button(onClick = { onConnectPeer(device) }, modifier = Modifier.height(36.dp)) { Text("Connect", fontSize = 10.sp) }
+                    }
+                }
+            }
         }
     }
 }
