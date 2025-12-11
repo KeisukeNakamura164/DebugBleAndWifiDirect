@@ -135,8 +135,9 @@ class BleManager(private val context: Context) {
     // コルーチンスコープ (Managerの生存期間に合わせるためSupervisorJobを使用)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    //todo この箇所が送信するメッセージ
     // 送信するメッセージを保持する変数
-    private var messageToSendContent: String = "デフォルトのメッセージ"
+    private var messageToSendContent: String = "BLE通信のデバックに使用されます。ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶヷヸヹヺabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#\$%&'()*+,-./:;<=>?@[]^_`{|}~永鬱驫鷗髙﨑壱弐参〇々〆"
 
     // 外部から、このメッセージを書き換えるための関数
     fun setCustomMessage(message: String) {
@@ -986,8 +987,7 @@ class BleManager(private val context: Context) {
         chunkIndex = 0
         dataToSend.clear()
 
-        val fullMessage = "Device Name: ${getDeviceName()}, $message"
-        val dataBytes = fullMessage.toByteArray(Charsets.UTF_8)
+        val dataBytes = message.toByteArray(Charsets.UTF_8)
         val chunkSize = currentMtu - 3 - 1
         var offset = 0
         var sequenceNumber = 1
