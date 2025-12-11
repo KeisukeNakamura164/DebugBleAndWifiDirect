@@ -156,7 +156,7 @@ fun ControleeScreen() {
                         onClick = {
                             // スキャン開始 -> 見つかれば接続 -> 送信 -> 受信 -> 切断 まで自動
                             bleManager.startScan()
-                            bleManager.setCustomMessage("距離測定テスト: ${uwbDistanceText}")
+                            //bleManager.setCustomMessage("距離測定テスト: ${uwbDistanceText}")
                             experimentLogs.add(0, "システム: 計測(スキャン)を開始しました...")
                         },
                         enabled = !isScanning
