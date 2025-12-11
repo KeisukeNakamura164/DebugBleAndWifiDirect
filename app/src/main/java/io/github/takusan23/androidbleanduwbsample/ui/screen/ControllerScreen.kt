@@ -144,7 +144,7 @@ fun ControllerScreen() {
             experimentLogs.add(0, log)
 
             // ★重要: 次のメッセージを受け取れるように、Manager側の変数を空にする
-            //bleManager.clearMessage()
+            bleManager.clearMessage()
         }
     }
 
@@ -179,6 +179,7 @@ fun ControllerScreen() {
                     Button(
                         onClick = {
                             // 待受開始
+                            bleManager.setCustomMessage("BLE通信のデバックに使用されます。ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶヷヸヹヺabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#\$%&'()*+,-./:;<=>?@[]^_`{|}~永鬱驫鷗髙﨑壱弐参〇々〆")
                             bleManager.startAdvertising()
                             Toast.makeText(context, "アドバタイズ開始", Toast.LENGTH_SHORT).show()
                             experimentLogs.add(0, "システム: 待受を開始しました")

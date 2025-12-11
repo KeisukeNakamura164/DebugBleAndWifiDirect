@@ -990,6 +990,12 @@ class BleManager(private val context: Context) {
     }
 
     private fun setupGattServer() {
+
+        if (gattServer != null) {
+            Log.d(TAG, "GATTサーバーは既に起動しています。")
+            return
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             ActivityCompat.checkSelfPermission(
                 context,
