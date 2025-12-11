@@ -586,21 +586,8 @@ class BleManager(private val context: Context) {
                     replyDataBuffer.clear() // バッファクリア
 
                     if (finalMessage.isNotEmpty()) {
-                        scope.launch(Dispatchers.IO) { // DB操作はバックグラウンド(IO)で行う
-                            Log.d(
-                                "GATT_CLIENT",
-                                "メッセージをDBに保存します: ${finalMessage.take(20)}..."
-                            )
-                            //todo メッセージを保存する
-                            try {
-                                //messageRepository.insertMessage(finalMessage)
-                            } catch (e: Exception) {
-                                Log.e("GATT_CLIENT", "DB保存に失敗しました", e)
-                            }
-                        }
 
                         _receivedMessage.value = "サーバーからの返信: $finalMessage"
-
 
                         Log.d("GATT_CLIENT", "返信の受信完了。切断します。")
                         disconnectClient()
