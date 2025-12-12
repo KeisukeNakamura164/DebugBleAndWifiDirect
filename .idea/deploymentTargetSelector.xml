@@ -15,12 +15,12 @@
           <targets>
             <Target type="DEFAULT_BOOT">
               <handle>
-                <DeviceId pluginId="PhysicalDevice" identifier="serial=46191HFH809CNC" />
+                <DeviceId pluginId="PhysicalDevice" identifier="serial=47261HFH80BXGL" />
               </handle>
             </Target>
             <Target type="DEFAULT_BOOT">
               <handle>
-                <DeviceId pluginId="PhysicalDevice" identifier="serial=47261HFH80BXGL" />
+                <DeviceId pluginId="PhysicalDevice" identifier="serial=46191HFH809CNC" />
               </handle>
             </Target>
           </targets>

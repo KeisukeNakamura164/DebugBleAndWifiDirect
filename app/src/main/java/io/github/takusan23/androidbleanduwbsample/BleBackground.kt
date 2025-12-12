@@ -71,7 +71,7 @@ class BleManager(private val context: Context) {
 
 
     // アドバタイズで使っているサービスUUID
-    private val SERVICE_UUID: UUID = UUID.fromString("42a3302d-83ca-44b4-9b5a-e5f369bb673a")
+    private val SERVICE_UUID: UUID = UUID.fromString("42a3302d-83ca-44b4-9b5a-e5f369bb673b")
 
     // データを書き込むためのキャラクタリスティックUUID
     private val MESSAGE_CHAR_UUID: UUID = UUID.fromString("19b10001-e8f2-537e-4f6c-d104768a1214")
