@@ -83,11 +83,7 @@ fun ControllerScreen(
 
             Button(
                 onClick = {
-                    if (uwbControllerParams != null && controleeAddress != null) {
-                        onSwitchToP2p()
-                    } else {
-                        Toast.makeText(context, "準備中です...", Toast.LENGTH_SHORT).show()
-                    }
+                    onSwitchToP2p()
                 },
                 modifier = Modifier.fillMaxWidth().padding(16.dp)
             ) {
